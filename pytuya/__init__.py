@@ -2,6 +2,7 @@
 # E.g. https://wikidevi.com/wiki/Xenon_SM-PW701U
 #   SKYROKU SM-PW701U Wi-Fi Plug Smart Plug
 #   Wuudi SM-S0301-US - WIFI Smart Power Socket Multi Plug with 4 AC Outlets and 4 USB Charging Works with Alexa
+#	EXTSUD E14 WiFi Smart Bulb
 #
 # This would not exist without the protocol reverse engineering from
 # https://github.com/codetheweb/tuyapi by codetheweb and blackrozes
@@ -123,6 +124,53 @@ payload_dict = {
     "suffix": "000000000000aa55"
   }
 }
+
+def functionArraytoHex(data):
+    hexvalue = ""
+    for value in data:
+        temp = str(hex(int(value))).replace("0x","")
+        if len(temp) == 1:
+            temp = "0" + temp
+        hexvalue = hexvalue + temp
+    #print('Hexvalue %r' % hexvalue)
+    return hexvalue
+
+def speedCalc(data):
+    output = (data -100)*-1
+    return output
+
+def functionSingleColourtoHSVHex(r, g, b, colourtemp, brightness):
+    if not 0 <= r <= 255:
+        raise ValueError("The value for red needs to be between 0 and 255.")
+    if not 0 <= g <= 255:
+        raise ValueError("The value for green needs to be between 0 and 255.")
+    if not 0 <= b <= 255:
+        raise ValueError("The value for blue needs to be between 0 and 255.")
+
+    if not 0 <= colourtemp <= 255:
+        raise ValueError("The colour temperature needs to be between 0 and 255.")
+    if not 25 <= brightness <= 255:
+        raise ValueError("The brightness needs to be between 25 and 255.")
+
+
+    rgb = [r,g,b]
+    hsv = colorsys.rgb_to_hsv(rgb[0]/255, rgb[1]/255, rgb[2]/255)
+
+    hexvalue = ""
+    hexvalue = functionArraytoHex(rgb)
+
+
+    hsvarray = [int(hsv[0] * 360), int(hsv[1] * 255), int(hsv[2] * 255)]
+    #        hsvarray = [int(hsv[0] * 360), colourtemp, brightness]
+    hexvalue_hsv = ""
+    hexvalue_hsv = functionArraytoHex(hsvarray)
+    if len(hexvalue_hsv) == 7:
+        hexvalue = hexvalue + "0" + hexvalue_hsv
+    else:
+        hexvalue = hexvalue + "00" + hexvalue_hsv
+    return hexvalue
+
+
 
 class XenonDevice(object):
     def __init__(self, dev_id, address, local_key=None, dev_type=None, connection_timeout=10):
@@ -332,7 +380,7 @@ class BulbDevice(Device):
         dev_type = 'device'
         super(BulbDevice, self).__init__(dev_id, address, local_key, dev_type)
 
-    def set_colour(self, r, g, b):
+    def set_colour(self, r, g, b, colourtemp, brightness):
         """
         Set colour of an rgb bulb.
 
@@ -341,36 +389,10 @@ class BulbDevice(Device):
             g(int): Value for the colour green as int from 0-255.
             b(int): Value for the colour blue as int from 0-255.
         """
-        if not 0 <= r <= 255:
-            raise ValueError("The value for red needs to be between 0 and 255.")
-        if not 0 <= g <= 255:
-            raise ValueError("The value for green needs to be between 0 and 255.")
-        if not 0 <= b <= 255:
-            raise ValueError("The value for blue needs to be between 0 and 255.")
-        
-        rgb = [r,g,b]
-        hsv = colorsys.rgb_to_hsv(rgb[0]/255, rgb[1]/255, rgb[2]/255)
+        hexvalue = functionSingleColourtoHSVHex(r, g, b, colourtemp, brightness)
 
-        hexvalue = ""
-        for value in rgb:
-            temp = str(hex(int(value))).replace("0x","")
-            if len(temp) == 1:
-                temp = "0" + temp
-            hexvalue = hexvalue + temp
 
-        hsvarray = [int(hsv[0] * 360), int(hsv[1] * 255), int(hsv[2] * 255)]
-        hexvalue_hsv = ""
-        for value in hsvarray:
-            temp = str(hex(int(value))).replace("0x","")
-            if len(temp) == 1:
-                temp = "0" + temp
-            hexvalue_hsv = hexvalue_hsv + temp
-        if len(hexvalue_hsv) == 7:
-            hexvalue = hexvalue + "0" + hexvalue_hsv
-        else:
-            hexvalue = hexvalue + "00" + hexvalue_hsv
-
-        payload = self.generate_payload(SET, {'5': hexvalue, '2': 'colour'})
+        payload = self.generate_payload(SET, {'1': True, '5': hexvalue, '2': 'colour'})
         data = self._send_receive(payload)
         return data
 
@@ -387,6 +409,171 @@ class BulbDevice(Device):
         if not 0 <= colourtemp <= 255:
             raise ValueError("The colour temperature needs to be between 0 and 255.")
 
-        payload = self.generate_payload(SET, {'2': 'white', '3': brightness, '4': colourtemp})
+        payload = self.generate_payload(SET, {'1': True, '2': 'white', '3': brightness, '4': colourtemp})
         data = self._send_receive(payload)
+        return data
+
+    def set_pulse_scene(self, scene, r, g, b, brightness, colourtemp, speed):
+        """
+        Set either scene 1 or scene 3 in one colour for the bulb:
+            scene1: fades on/off
+            scene3: toggle on/off
+
+        Args:
+            scene(str): Value for scene needs to be either 'scene_1' or 'scene_3'
+            speed(int): Value for the speed as int from 1-100.
+
+            r(int): Value for the colour red as int from 0-255.
+            g(int): Value for the colour green as int from 0-255.
+            b(int): Value for the colour blue as int from 0-255.
+
+            brightness(int): Value for the brightness (25-255).
+            colourtemp(int): Value for the colour temperature (0-255).
+        """
+        if not 1 <= speed <= 100:
+            raise ValueError("The value for speed needs to be between 1 and 100.")
+
+        if not 0 <= r <= 255:
+            raise ValueError("The value for red needs to be between 0 and 255.")
+        if not 0 <= g <= 255:
+            raise ValueError("The value for green needs to be between 0 and 255.")
+        if not 0 <= b <= 255:
+            raise ValueError("The value for blue needs to be between 0 and 255.")
+
+        if not 25 <= brightness <= 255:
+            raise ValueError("The brightness needs to be between 25 and 255.")
+        if not 0 <= colourtemp <= 255:
+            raise ValueError("The colour temperature needs to be between 0 and 255.")
+
+
+
+
+        if scene == 'scene_3':
+            scene='scene_3'
+            jsonComponent =9
+        elif scene == 'scene_1':
+            scene='scene_1'
+            jsonComponent =7
+        else:
+            raise ValueError("The value for scene needs to be either 'scene_1' or 'scene_3'.")
+
+        rgb = [r,g,b]
+        hex_colour = functionArraytoHex(rgb)
+        print('HexColour %r' % hex_colour)
+
+
+        calculatedSpeed = speedCalc(speed)
+        # speed on the device is 100 is slowest and 1 is fastest, this does not appear to be seconds or milliseconds 
+        # so the speed is inverted to make more sense, 100 appears to be appox 4 flashes per second whereas 1 is a change every 2 seconds
+        metaCode = [brightness,colourtemp,1+calculatedSpeed]
+        hex_metaCode = functionArraytoHex(metaCode)
+        print('Metacode %r' % hex_metaCode)
+
+
+        speed_colour = hex_metaCode + '01' + hex_colour
+        print('try ' + speed_colour)
+
+
+        #dictPayload = {'1': True,'2': 'scene_1', '7': 'ffff320100ffff'}
+        dictPayload = {'1': True,'2': 'scene_1'}
+        dictPayload['2'] = scene
+        dictPayload[jsonComponent] = speed_colour
+        print(dictPayload)
+
+        payload = self.generate_payload(SET, dictPayload)
+        #^^^^ to try next
+
+        print(str(payload))
+        data = self._send_receive(payload)
+        data = payload
+        return data
+
+    def set_multi_scene(self, scene, brightness, colourtemp, speed, hex6colourcode):
+        """
+        Set either scene 2 or scene 4 in multiple colours for the bulb:
+            scene2: toggle between colours
+            scene4: fades between colours
+
+        Args:
+            scene(str): Value for scene needs to be either 'scene_2' or 'scene_4'
+            speed(int): Value for the speed as int from 1-100.
+
+            brightness(int): Value for the brightness (25-255).
+            colourtemp(int): Value for the colour temperature (0-255).
+            hex6colourcode(str) : Value in RGB HEX for the 6 colours to switch between
+        """
+        if not len(hex6colourcode) == 36:
+            raise ValueError("hexcode must be 36 characters long")
+            
+        if scene == 'scene_2':
+            scene='scene_2'
+            jsonComponent =8
+
+        else:
+            scene='scene_4'
+            jsonComponent =10
+
+        calculatedSpeed = speedCalc(speed)
+        # speed on the device is 100 is slowest and 1 is fastest, this does not appear to be seconds or milliseconds 
+        # so the speed is inverted to make more sense, 100 appears to be appox 4 flashes per second whereas 1 is a change every 2 seconds
+        metaCode = [brightness,colourtemp,1+calculatedSpeed]
+        hex_metaCode = functionArraytoHex(metaCode)
+        print('Metacode %r' % hex_metaCode)
+
+
+        speed_colour = hex_metaCode + '06' + hex6colourcode
+        #print('try ' + speed_colour)
+
+#        dictPayload = {'1': True,'2': 'scene_4'}
+        dictPayload = {'1': True}
+#        dictPayload = {'10': 'scene_4'}
+        #speed_colour= 'ffff0106ff0000ffff0000ff0000ffff0000ffff00ff'
+        #speed_colour= 'ffff64069400D30000FF00FF00FFFF00FF7F00FF0000'
+        dictPayload[jsonComponent] = speed_colour
+        print(dictPayload)
+
+        payload = self.generate_payload(SET, dictPayload)
+
+
+        print(str(payload))
+        data = self._send_receive(payload)
+        data = payload
+        return data
+
+    def set_static_scene(self, r, g, b, colourtemp, brightness):
+        """
+		set scene on
+
+        
+        """
+        
+        hexvalue = functionSingleColourtoHSVHex(r, g, b, colourtemp, brightness)
+        dictPayload = {'1': True,'2': 'scene'}
+        dictPayload['6'] = hexvalue
+        
+        print(dictPayload)
+
+        payload = self.generate_payload(SET, dictPayload)
+
+
+        print(str(payload))
+        data = self._send_receive(payload)
+        data = payload
+        return data        
+        
+    def set_multi_scene_ON(self,scene):
+        """
+		set scene on
+
+        
+        """
+        dictPayload = {'1': True,'2': scene}
+        print(dictPayload)
+
+        payload = self.generate_payload(SET, dictPayload)
+
+
+        print(str(payload))
+        data = self._send_receive(payload)
+        data = payload
         return data
